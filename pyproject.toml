@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sentinel-security-advisor"
+version = "0.1.0"
+description = "MCP server that analyzes the security posture of your MCP tool setup"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=2.0.0",
+]
+
+[project.scripts]
+sentinel = "sentinel.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sentinel"]
