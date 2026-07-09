@@ -8,6 +8,8 @@ exfiltration paths, prompt injection vectors, and overly permissive access.
 
 from fastmcp import FastMCP, Context
 
+SAMPLING_SPEC_URL = "https://modelcontextprotocol.io/specification/client/sampling"
+
 mcp = FastMCP(
     "sentinel",
     instructions=(
@@ -67,6 +69,25 @@ End with a brief overall assessment.\
 """
 
 
+def _sampling_error_message(exc: Exception) -> str:
+    """Build a clear, actionable message for a failed/unsupported sampling call."""
+    return (
+        "Sentinel requires an MCP client that supports sampling, and this "
+        f"client returned an error: {exc}. See {SAMPLING_SPEC_URL} for details."
+    )
+
+
+async def _discover_tools(ctx: Context) -> str:
+    """Ask the client LLM to enumerate its connected MCP tools via sampling."""
+    ctx.info("Discovering connected MCP tools...")
+    discovery = await ctx.sample(
+        messages="List all MCP tools you currently have access to, with their capabilities.",
+        system_prompt=DISCOVERY_SYSTEM_PROMPT,
+        max_tokens=8192,
+    )
+    return discovery.text
+
+
 @mcp.tool
 async def assess(ctx: Context) -> str:
     """Analyze the security posture of your MCP tool setup.
@@ -76,24 +97,24 @@ async def assess(ctx: Context) -> str:
     prompt injection vectors, and overly permissive access.
     """
     # Step 1: Ask the client LLM to describe its available tools
-    ctx.info("Discovering connected MCP tools...")
-    discovery = await ctx.sample(
-        messages="List all MCP tools you currently have access to, with their capabilities.",
-        system_prompt=DISCOVERY_SYSTEM_PROMPT,
-        max_tokens=8192,
-    )
+    try:
+        tool_inventory = await _discover_tools(ctx)
+    except Exception as exc:
+        return _sampling_error_message(exc)
 
-    tool_inventory = discovery.text
     if not tool_inventory or not tool_inventory.strip():
         return "Could not discover any MCP tools. The client may not support sampling."
 
     # Step 2: Analyze the tool inventory for security risks
     ctx.info("Analyzing tool configuration for security risks...")
-    analysis = await ctx.sample(
-        messages=ANALYSIS_USER_PROMPT.format(tools=tool_inventory),
-        system_prompt=ANALYSIS_SYSTEM_PROMPT,
-        max_tokens=8192,
-    )
+    try:
+        analysis = await ctx.sample(
+            messages=ANALYSIS_USER_PROMPT.format(tools=tool_inventory),
+            system_prompt=ANALYSIS_SYSTEM_PROMPT,
+            max_tokens=8192,
+        )
+    except Exception as exc:
+        return _sampling_error_message(exc)
 
     return analysis.text or "Analysis produced no output."
 
@@ -106,14 +127,12 @@ async def discover(ctx: Context) -> str:
     and their capabilities. Useful for understanding your current tool
     surface before running a full security assessment.
     """
-    ctx.info("Discovering connected MCP tools...")
-    discovery = await ctx.sample(
-        messages="List all MCP tools you currently have access to, with their capabilities.",
-        system_prompt=DISCOVERY_SYSTEM_PROMPT,
-        max_tokens=8192,
-    )
+    try:
+        tool_inventory = await _discover_tools(ctx)
+    except Exception as exc:
+        return _sampling_error_message(exc)
 
-    return discovery.text or "Could not discover any MCP tools."
+    return tool_inventory or "Could not discover any MCP tools."
 
 
 def main():

@@ -7,10 +7,13 @@ drive them through FastMCP's in-memory ``Client`` with a mocked
 
 import pytest
 from fastmcp import Client
+from mcp.shared.exceptions import McpError
+from mcp.types import ErrorData
 
 from sentinel.server import (
     ANALYSIS_SYSTEM_PROMPT,
     DISCOVERY_SYSTEM_PROMPT,
+    SAMPLING_SPEC_URL,
     mcp,
 )
 
@@ -33,6 +36,13 @@ def make_handler(discovery=DISCOVERY_TEXT, analysis=ANALYSIS_TEXT):
         return discovery
 
     handler.calls = calls
+    return handler
+
+
+def _handler_raising(exc: Exception):
+    async def handler(messages, params, ctx):
+        raise exc
+
     return handler
 
 
@@ -85,3 +95,26 @@ async def test_tools_registered():
 
     names = {tool.name for tool in tools}
     assert {"assess", "discover"} <= names
+
+
+@pytest.mark.parametrize("tool", ["assess", "discover"])
+async def test_sampling_failure_returns_friendly_message(tool):
+    # A handler that raises surfaces to ctx.sample as an McpError inside the tool.
+    handler = _handler_raising(
+        McpError(ErrorData(code=-32603, message="sampling not supported"))
+    )
+    async with Client(mcp, sampling_handler=handler) as client:
+        result = await client.call_tool(tool, {})
+
+    assert "Sentinel requires an MCP client that supports sampling" in result.data
+    assert SAMPLING_SPEC_URL in result.data
+
+
+@pytest.mark.parametrize("tool", ["assess", "discover"])
+async def test_unsupported_sampling_returns_friendly_message(tool):
+    # No sampling_handler at all: ctx.sample raises "Client does not support sampling".
+    async with Client(mcp) as client:
+        result = await client.call_tool(tool, {})
+
+    assert "Sentinel requires an MCP client that supports sampling" in result.data
+    assert SAMPLING_SPEC_URL in result.data
