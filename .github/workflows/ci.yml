@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install project
+        run: uv sync
+
+      - name: Lint (ruff)
+        run: uv run --with ruff ruff check .
+
+      - name: Run tests (pytest)
+        run: |
+          code=0
+          uv run --with pytest pytest || code=$?
+          # Exit code 5 = no tests collected; tolerate until tests land.
+          if [ "$code" -eq 5 ]; then
+            echo "No tests collected — passing until tests are added."
+          elif [ "$code" -ne 0 ]; then
+            exit "$code"
+          fi
