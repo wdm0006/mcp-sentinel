@@ -132,7 +132,10 @@ async def discover(ctx: Context) -> str:
     except Exception as exc:
         return _sampling_error_message(exc)
 
-    return tool_inventory or "Could not discover any MCP tools."
+    if not tool_inventory or not tool_inventory.strip():
+        return "Could not discover any MCP tools."
+
+    return tool_inventory
 
 
 def main():

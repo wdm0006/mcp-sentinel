@@ -89,6 +89,23 @@ async def test_discover_empty_fallback():
     assert result.data == "Could not discover any MCP tools."
 
 
+async def test_discover_whitespace_only_fallback():
+    handler = make_handler(discovery="   \n  ")
+    async with Client(mcp, sampling_handler=handler) as client:
+        result = await client.call_tool("discover", {})
+
+    assert result.data == "Could not discover any MCP tools."
+
+
+async def test_discover_preserves_surrounding_formatting():
+    padded = f"\n{DISCOVERY_TEXT}\n"
+    handler = make_handler(discovery=padded)
+    async with Client(mcp, sampling_handler=handler) as client:
+        result = await client.call_tool("discover", {})
+
+    assert result.data == padded
+
+
 async def test_tools_registered():
     async with Client(mcp) as client:
         tools = await client.list_tools()
