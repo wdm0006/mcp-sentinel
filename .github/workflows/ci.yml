@@ -27,12 +27,4 @@ jobs:
         run: uv run --with ruff ruff check .
 
       - name: Run tests (pytest)
-        run: |
-          code=0
-          uv run --with pytest pytest || code=$?
-          # Exit code 5 = no tests collected; tolerate until tests land.
-          if [ "$code" -eq 5 ]; then
-            echo "No tests collected — passing until tests are added."
-          elif [ "$code" -ne 0 ]; then
-            exit "$code"
-          fi
+        run: uv run pytest
