@@ -79,7 +79,7 @@ def _sampling_error_message(exc: Exception) -> str:
 
 async def _discover_tools(ctx: Context) -> str:
     """Ask the client LLM to enumerate its connected MCP tools via sampling."""
-    ctx.info("Discovering connected MCP tools...")
+    await ctx.info("Discovering connected MCP tools...")
     discovery = await ctx.sample(
         messages="List all MCP tools you currently have access to, with their capabilities.",
         system_prompt=DISCOVERY_SYSTEM_PROMPT,
@@ -106,7 +106,7 @@ async def assess(ctx: Context) -> str:
         return "Could not discover any MCP tools. The client may not support sampling."
 
     # Step 2: Analyze the tool inventory for security risks
-    ctx.info("Analyzing tool configuration for security risks...")
+    await ctx.info("Analyzing tool configuration for security risks...")
     try:
         analysis = await ctx.sample(
             messages=ANALYSIS_USER_PROMPT.format(tools=tool_inventory),

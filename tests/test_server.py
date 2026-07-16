@@ -69,6 +69,37 @@ async def test_discover_happy_path():
     assert handler.calls[0] == DISCOVERY_SYSTEM_PROMPT
 
 
+async def test_discover_reports_progress():
+    messages = []
+
+    async def log_handler(message):
+        messages.append(message.data["msg"])
+
+    async with Client(
+        mcp, sampling_handler=make_handler(), log_handler=log_handler
+    ) as client:
+        await client.call_tool("discover", {})
+
+    assert messages == ["Discovering connected MCP tools..."]
+
+
+async def test_assess_reports_progress():
+    messages = []
+
+    async def log_handler(message):
+        messages.append(message.data["msg"])
+
+    async with Client(
+        mcp, sampling_handler=make_handler(), log_handler=log_handler
+    ) as client:
+        await client.call_tool("assess", {})
+
+    assert messages == [
+        "Discovering connected MCP tools...",
+        "Analyzing tool configuration for security risks...",
+    ]
+
+
 async def test_assess_empty_discovery_fallback():
     handler = make_handler(discovery="   ")
     async with Client(mcp, sampling_handler=handler) as client:
