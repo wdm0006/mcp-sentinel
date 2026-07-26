@@ -21,8 +21,8 @@ No API keys needed — Sentinel uses the client's own LLM via sampling.
 uvx sentinel-security-advisor
 
 # Or install from source
-git clone https://github.com/your-org/sentinel-security-advisor
-cd sentinel-security-advisor
+git clone https://github.com/wdm0006/mcp-sentinel
+cd mcp-sentinel
 uv sync
 uv run sentinel
 ```
