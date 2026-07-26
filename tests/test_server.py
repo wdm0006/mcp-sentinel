@@ -112,6 +112,35 @@ async def test_assess_empty_discovery_fallback():
     assert len(handler.calls) == 1
 
 
+async def test_assess_empty_analysis_fallback():
+    handler = make_handler(analysis="")
+    async with Client(mcp, sampling_handler=handler) as client:
+        result = await client.call_tool("assess", {})
+
+    assert result.data == "Analysis produced no output."
+    # Both sampling calls ran: discovery succeeded, then analysis returned blank.
+    assert len(handler.calls) == 2
+    assert handler.calls[0] == DISCOVERY_SYSTEM_PROMPT
+    assert handler.calls[1] == ANALYSIS_SYSTEM_PROMPT
+
+
+async def test_assess_passes_inventory_into_analysis():
+    analysis_messages = []
+
+    async def handler(messages, params, ctx):
+        if params.systemPrompt == ANALYSIS_SYSTEM_PROMPT:
+            analysis_messages.append(str(messages))
+            return ANALYSIS_TEXT
+        return DISCOVERY_TEXT
+
+    async with Client(mcp, sampling_handler=handler) as client:
+        await client.call_tool("assess", {})
+
+    # The discovered inventory is threaded verbatim into the analysis prompt,
+    # proving the {tools} interpolation carries discovery -> analysis.
+    assert "filesystem: reads and writes local files" in analysis_messages[0]
+
+
 async def test_discover_empty_fallback():
     handler = make_handler(discovery="")
     async with Client(mcp, sampling_handler=handler) as client:
