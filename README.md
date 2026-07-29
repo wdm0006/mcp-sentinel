@@ -2,23 +2,24 @@
 
 MCP server that analyzes the security posture of your MCP tool setup.
 
-Sentinel uses [MCP sampling](https://spec.modelcontextprotocol.io/specification/client/sampling/) to ask the client LLM to describe its available tools, then analyzes the combination for security risks like data exfiltration paths, prompt injection vectors, and overly permissive access.
+You give Sentinel an inventory of the MCP tools available in your session, and it analyzes the combination for security risks like data exfiltration paths, prompt injection vectors, and overly permissive access.
 
 ## How it works
 
 1. You ask your AI model to assess your security posture
-2. Sentinel uses sampling to ask the client LLM: "what tools do you have?"
-3. The LLM describes all its connected MCP tools and their capabilities
-4. Sentinel samples again, asking the LLM to analyze that tool set for security risks
-5. You get back a risk assessment with specific findings and recommendations
+2. Your model lists the MCP tools it has access to and passes that list to Sentinel's `assess` tool
+3. Sentinel analyzes that tool set for security risks server-side, using the Anthropic API
+4. You get back a risk assessment with specific findings and recommendations
 
-No API keys needed — Sentinel uses the client's own LLM via sampling.
+The `sentinel_audit` prompt spells out the inventory format if you want to drive step 2 explicitly.
+
+> **Why the tool list is an argument.** Sentinel used to ask the client's own LLM to enumerate its tools via [MCP sampling](https://modelcontextprotocol.io/specification/2026-07-28/deprecated). Sampling is deprecated as of the [2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28/changelog), which recommends passing this kind of context as ordinary tool parameters instead. Your agent can already see its own tool list, so it supplies it directly.
 
 ## Install
 
 ```bash
-# Run directly with uvx
-uvx sentinel-security-advisor
+# Run directly from GitHub (no install needed)
+uvx --from git+https://github.com/wdm0006/mcp-sentinel sentinel
 
 # Or install from source
 git clone https://github.com/wdm0006/mcp-sentinel
@@ -34,7 +35,10 @@ uv run sentinel
   "mcpServers": {
     "sentinel": {
       "command": "uvx",
-      "args": ["sentinel-security-advisor"]
+      "args": ["--from", "git+https://github.com/wdm0006/mcp-sentinel", "sentinel"],
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-..."
+      }
     }
   }
 }
@@ -42,9 +46,9 @@ uv run sentinel
 
 ## Tools
 
-### `assess`
+### `assess(tool_inventory)`
 
-Runs a full security analysis. Discovers all connected MCP tools via sampling, then analyzes them for risks including:
+Runs a security analysis over the tool inventory you pass in, covering:
 
 - Data exfiltration paths
 - Prompt injection vectors
@@ -52,11 +56,22 @@ Runs a full security analysis. Discovers all connected MCP tools via sampling, t
 - Missing authentication
 - Lateral movement potential
 
-### `discover`
+The inventory is treated as untrusted data, not instructions: it is delimited and escaped, and the analyst prompt is told to report any embedded instructions as a finding rather than follow them.
 
-Lists all MCP tools the client model has access to. Useful for understanding your tool surface before running a full assessment.
+## Prompts
+
+### `sentinel_audit`
+
+Returns the instructions for enumerating your tools in the format `assess` expects, then calling it.
+
+## Configuration
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `ANTHROPIC_API_KEY` | yes | — | Used to run the analysis |
+| `SENTINEL_MODEL` | no | `claude-opus-5` | Model used for the analysis |
 
 ## Requirements
 
 - Python 3.12+
-- An MCP client that supports [sampling](https://spec.modelcontextprotocol.io/specification/client/sampling/)
+- An Anthropic API key

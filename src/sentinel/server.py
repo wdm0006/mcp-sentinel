@@ -1,35 +1,34 @@
 """
-Sentinel - MCP security advisor that uses sampling to analyze your tool setup.
+Sentinel - MCP security advisor that analyzes your tool setup.
 
-A single-file MCP server that asks the client LLM to describe its available
-tools, then analyzes the configuration for security risks like data
+A single-file MCP server that takes an inventory of the MCP tools available in
+a session and analyzes the configuration for security risks like data
 exfiltration paths, prompt injection vectors, and overly permissive access.
+
+The inventory arrives as an ordinary tool argument. Under the 2026-07-28 MCP
+specification a server cannot ask the client's model to enumerate its own
+tools -- Sampling is deprecated -- so the calling agent, which can already see
+its own tool list, passes it in.
 """
 
-from fastmcp import FastMCP, Context
+import os
+import sys
 
-SAMPLING_SPEC_URL = "https://modelcontextprotocol.io/specification/client/sampling"
+import anthropic
+from fastmcp import FastMCP
+
+MODEL = os.environ.get("SENTINEL_MODEL", "claude-opus-5")
+MAX_TOKENS = 16000
 
 mcp = FastMCP(
     "sentinel",
     instructions=(
-        "Sentinel analyzes the security posture of your MCP tool setup. "
-        "Call the assess tool to get a security risk analysis of all "
-        "your currently connected MCP tools."
+        "Sentinel analyzes the security posture of an MCP tool setup. "
+        "Call the assess tool with a description of the MCP tools available "
+        "in this session to get a security risk analysis. Use the "
+        "sentinel_audit prompt if you want the inventory format spelled out."
     ),
 )
-
-DISCOVERY_SYSTEM_PROMPT = """\
-You are cataloging MCP tools. List every MCP tool you have access to \
-(excluding any sentinel tools). For each tool provide:
-- Tool name
-- What it can read or access
-- What actions it can take (send messages, write files, query databases, \
-execute code, etc.)
-- What authentication or permissions it requires, if known
-
-Be thorough. Include every tool.\
-"""
 
 ANALYSIS_SYSTEM_PROMPT = """\
 You are a security analyst specializing in AI tool chain security. \
@@ -73,80 +72,99 @@ For each risk found, provide:
 End with a brief overall assessment.\
 """
 
+INVENTORY_INSTRUCTIONS = """\
+List every MCP tool you currently have access to, excluding any sentinel \
+tools. For each tool provide:
+- Tool name
+- What it can read or access
+- What actions it can take (send messages, write files, query databases, \
+execute code, etc.)
+- What authentication or permissions it requires, if known
 
-def _sampling_error_message(exc: Exception) -> str:
-    """Build a clear, actionable message for a failed/unsupported sampling call."""
-    return (
-        "Sentinel requires an MCP client that supports sampling, and this "
-        f"client returned an error: {exc}. See {SAMPLING_SPEC_URL} for details."
-    )
+Be thorough. Include every tool. Then call the sentinel `assess` tool, \
+passing that list as the `tool_inventory` argument.\
+"""
+
+REFUSAL_MESSAGE = (
+    "The analysis was declined by the model's safety classifiers. This can "
+    "happen with security-adjacent content; try narrowing the inventory to the "
+    "specific tools you are concerned about."
+)
 
 
-async def _discover_tools(ctx: Context) -> str:
-    """Ask the client LLM to enumerate its connected MCP tools via sampling."""
-    await ctx.info("Discovering connected MCP tools...")
-    discovery = await ctx.sample(
-        messages="List all MCP tools you currently have access to, with their capabilities.",
-        system_prompt=DISCOVERY_SYSTEM_PROMPT,
-        max_tokens=8192,
-    )
-    return discovery.text
+def _log(message: str) -> None:
+    """Write a diagnostic line to stderr.
+
+    The MCP Logging feature is deprecated as of the 2026-07-28 specification,
+    which suggests stderr for stdio servers.
+    """
+    print(f"[sentinel] {message}", file=sys.stderr, flush=True)
+
+
+def _client() -> anthropic.AsyncAnthropic:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is not set. Sentinel analyzes tool inventories "
+            "with the Anthropic API and cannot run without a key."
+        )
+    return anthropic.AsyncAnthropic()
 
 
 @mcp.tool
-async def assess(ctx: Context) -> str:
-    """Analyze the security posture of your MCP tool setup.
+async def assess(tool_inventory: str) -> str:
+    """Analyze the security posture of an MCP tool setup.
 
-    Uses sampling to discover all connected MCP tools, then analyzes
-    the combination for security risks like data exfiltration paths,
-    prompt injection vectors, and overly permissive access.
+    Pass a description of the MCP tools available in this session -- their
+    names, what they can read, what actions they can take, and what
+    authentication they need. Returns an analysis of the combination for
+    security risks like data exfiltration paths, prompt injection vectors,
+    and overly permissive access.
+
+    Args:
+        tool_inventory: A list or description of the MCP tools to analyze.
     """
-    # Step 1: Ask the client LLM to describe its available tools
-    try:
-        tool_inventory = await _discover_tools(ctx)
-    except Exception as exc:
-        return _sampling_error_message(exc)
-
     if not tool_inventory or not tool_inventory.strip():
-        return "Could not discover any MCP tools. The client may not support sampling."
-
-    # Step 2: Analyze the tool inventory for security risks
-    await ctx.info("Analyzing tool configuration for security risks...")
-    try:
-        safe_tool_inventory = tool_inventory.replace(
-            "</tool_inventory>", "&lt;/tool_inventory>"
+        return (
+            "No tool inventory provided. List the MCP tools available in this "
+            "session and pass them as the tool_inventory argument."
         )
-        analysis = await ctx.sample(
-            messages=ANALYSIS_USER_PROMPT.format(tools=safe_tool_inventory),
-            system_prompt=ANALYSIS_SYSTEM_PROMPT,
-            max_tokens=8192,
-        )
-    except Exception as exc:
-        return _sampling_error_message(exc)
 
-    return analysis.text or "Analysis produced no output."
+    safe_tool_inventory = tool_inventory.replace(
+        "</tool_inventory>", "&lt;/tool_inventory>"
+    )
+
+    _log("Analyzing tool configuration for security risks...")
+    response = await _client().beta.messages.create(
+        model=MODEL,
+        max_tokens=MAX_TOKENS,
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",
+        system=ANALYSIS_SYSTEM_PROMPT,
+        messages=[
+            {
+                "role": "user",
+                "content": ANALYSIS_USER_PROMPT.format(tools=safe_tool_inventory),
+            }
+        ],
+    )
+
+    if response.stop_reason == "refusal":
+        _log("Analysis declined by safety classifiers.")
+        return REFUSAL_MESSAGE
+
+    text = "".join(block.text for block in response.content if block.type == "text")
+    return text.strip() or "Analysis produced no output."
 
 
-@mcp.tool
-async def discover(ctx: Context) -> str:
-    """List all MCP tools the client model has access to.
-
-    Uses sampling to ask the client LLM to enumerate its available tools
-    and their capabilities. Useful for understanding your current tool
-    surface before running a full security assessment.
-    """
-    try:
-        tool_inventory = await _discover_tools(ctx)
-    except Exception as exc:
-        return _sampling_error_message(exc)
-
-    if not tool_inventory or not tool_inventory.strip():
-        return "Could not discover any MCP tools."
-
-    return tool_inventory
+@mcp.prompt
+def sentinel_audit() -> str:
+    """Walk through a security audit of the MCP tools in this session."""
+    return INVENTORY_INSTRUCTIONS
 
 
 def main():
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        _log("warning: ANTHROPIC_API_KEY is not set; assess will fail until it is.")
     mcp.run()
 
 
