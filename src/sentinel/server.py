@@ -57,6 +57,23 @@ CAPABILITY_DESCRIPTIONS = {
 }
 
 
+def _capability_glossary(template: str, separator: str) -> str:
+    """Render every capability and its meaning from CAPABILITY_DESCRIPTIONS."""
+    return separator.join(
+        template.format(value=capability.value, meaning=meaning)
+        for capability, meaning in CAPABILITY_DESCRIPTIONS.items()
+    )
+
+
+CAPABILITIES_FIELD_DESCRIPTION = (
+    "Capability categories this tool carries. Allowed values: "
+    + _capability_glossary("{value} - {meaning}", "; ")
+    + "."
+)
+
+CAPABILITY_BULLETS = _capability_glossary("- `{value}` - {meaning}.", "\n")
+
+
 class ToolEntry(BaseModel):
     """One tool in the session, with the capability categories it carries."""
 
@@ -65,10 +82,7 @@ class ToolEntry(BaseModel):
     name: str = Field(description="The tool's name as the client exposes it.")
     capabilities: list[Capability] = Field(
         default_factory=list,
-        description=(
-            "Capability categories this tool carries. Allowed values: "
-            "sensitive-read, outbound-write, untrusted-ingest, privileged-action."
-        ),
+        description=CAPABILITIES_FIELD_DESCRIPTION,
     )
 
 
@@ -210,24 +224,27 @@ def _analyze(inventory: list[ToolEntry]) -> Assessment:
     return Assessment(findings=findings, summary=_summary(findings), limitations=LIMITATIONS)
 
 
-@mcp.tool
+ASSESS_DESCRIPTION = f"""Assess an MCP tool surface for risky capability pairings.
+
+Pass every tool available in this session, tagging each with the capability
+categories it carries:
+
+{CAPABILITY_BULLETS}
+
+A tool may carry several categories, or none. Sentinel reports two
+pairings: `sensitive-read` with `outbound-write` (data exfiltration) and
+`untrusted-ingest` with `privileged-action` (prompt injection into a
+privileged call). A single tool holding both sides of a pairing is reported
+too. The result is deterministic and depends only on the inventory's
+content, not its order."""
+
+
+@mcp.tool(description=ASSESS_DESCRIPTION)
 def assess(tool_inventory: list[ToolEntry]) -> Assessment:
     """Assess an MCP tool surface for risky capability pairings.
 
-    Pass every tool available in this session, tagging each with the capability
-    categories it carries:
-
-    - `sensitive-read` - reads data the session should not leak.
-    - `outbound-write` - sends data outside the session.
-    - `untrusted-ingest` - pulls in content controlled by someone else.
-    - `privileged-action` - takes actions with consequences.
-
-    A tool may carry several categories, or none. Sentinel reports two
-    pairings: `sensitive-read` with `outbound-write` (data exfiltration) and
-    `untrusted-ingest` with `privileged-action` (prompt injection into a
-    privileged call). A single tool holding both sides of a pairing is reported
-    too. The result is deterministic and depends only on the inventory's
-    content, not its order.
+    The description the calling model reads is ASSESS_DESCRIPTION, whose
+    capability bullets come from CAPABILITY_DESCRIPTIONS.
     """
     return _analyze(tool_inventory)
 
