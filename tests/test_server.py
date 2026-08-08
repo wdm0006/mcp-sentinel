@@ -11,7 +11,13 @@ import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
-from sentinel.server import LIMITATIONS, NO_FINDINGS_SUMMARY, mcp
+from sentinel.server import (
+    CAPABILITY_DESCRIPTIONS,
+    LIMITATIONS,
+    NO_FINDINGS_SUMMARY,
+    Capability,
+    mcp,
+)
 
 
 async def assess(inventory):
@@ -40,6 +46,23 @@ async def test_only_assess_is_registered_and_takes_a_structured_inventory():
         "untrusted-ingest",
         "privileged-action",
     ]
+
+
+async def test_every_capability_meaning_reaches_the_calling_model():
+    async with Client(mcp) as client:
+        tools = await client.list_tools()
+
+    entry = tools[0].inputSchema["properties"]["tool_inventory"]["items"]
+    field_description = entry["properties"]["capabilities"]["description"]
+
+    for capability in Capability:
+        meaning = CAPABILITY_DESCRIPTIONS[capability]
+        # The schema the model is handed must carry the meaning, not just the value.
+        assert capability.value in field_description
+        assert meaning in field_description
+        # And so must the tool description it reads before tagging anything.
+        assert capability.value in tools[0].description
+        assert meaning in tools[0].description
 
 
 async def test_unknown_capability_fails_validation():
