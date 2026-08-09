@@ -6,9 +6,10 @@ values. No model, no sampling, no network.
 """
 
 import json
+import re
+import tomllib
 from itertools import permutations
 from pathlib import Path
-import re
 
 import pytest
 from fastmcp import Client
@@ -354,8 +355,11 @@ async def test_result_documents_the_self_report_limitation():
     assert "in-session advisor" in result["limitations"]
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
 async def test_readme_example_matches_assess_output_exactly():
-    readme = Path("README.md").read_text()
+    readme = (REPO_ROOT / "README.md").read_text()
     call = re.search(r"### Example call\n\n```json\n(.*?)\n```", readme, re.DOTALL)
     documented = re.search(r"### Example result\n\n```json\n(.*?)\n```", readme, re.DOTALL)
 
@@ -363,3 +367,42 @@ async def test_readme_example_matches_assess_output_exactly():
     assert documented is not None
     payload = json.loads(call.group(1))
     assert await assess(payload["tool_inventory"]) == json.loads(documented.group(1))
+
+
+def _executable_run_by(args):
+    """The executable ``uvx`` runs: the token after ``--from <ref>``, or the bare argument."""
+    if args[:1] == ["--from"]:
+        args = args[2:]
+    return args[0] if args else None
+
+
+def _readme_uvx_executables(readme):
+    """Every executable name a ``uvx`` invocation in the README resolves to."""
+    executables = []
+    for language, body in re.findall(r"```(\w*)\n(.*?)```", readme, re.DOTALL):
+        if language == "json":
+            document = json.loads(body)
+            for server in document.get("mcpServers", {}).values():
+                if server.get("command") == "uvx":
+                    executables.append(_executable_run_by(server.get("args", [])))
+        else:
+            for line in body.splitlines():
+                tokens = line.split()
+                if tokens[:1] == ["uvx"]:
+                    executables.append(_executable_run_by(tokens[1:]))
+    return executables
+
+
+def test_readme_uvx_commands_name_a_declared_console_script():
+    """The launch commands must resolve to an executable the package actually ships."""
+    readme = (REPO_ROOT / "README.md").read_text()
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    scripts = sorted(pyproject["project"]["scripts"])
+
+    executables = _readme_uvx_executables(readme)
+
+    assert executables, "the README should document at least one uvx launch command"
+    for executable in executables:
+        assert executable in scripts, (
+            f"README runs `uvx ... {executable}`, but [project.scripts] declares {scripts}"
+        )

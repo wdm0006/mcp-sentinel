@@ -18,7 +18,7 @@ findings.
 
 ```bash
 # Run directly with uvx
-uvx sentinel-security-advisor
+uvx --from git+https://github.com/wdm0006/mcp-sentinel sentinel
 
 # Or install from source
 git clone https://github.com/wdm0006/mcp-sentinel
@@ -34,7 +34,7 @@ uv run sentinel
   "mcpServers": {
     "sentinel": {
       "command": "uvx",
-      "args": ["sentinel-security-advisor"]
+      "args": ["--from", "git+https://github.com/wdm0006/mcp-sentinel", "sentinel"]
     }
   }
 }
