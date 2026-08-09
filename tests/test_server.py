@@ -5,7 +5,10 @@ drives the real tool through FastMCP's in-memory ``Client`` and asserts exact
 values. No model, no sampling, no network.
 """
 
+import json
 from itertools import permutations
+from pathlib import Path
+import re
 
 import pytest
 from fastmcp import Client
@@ -93,21 +96,19 @@ async def test_sensitive_read_with_outbound_write_reports_exfiltration():
                 "severity": "high",
                 "tools": ["db", "http"],
                 "description": (
-                    "'db' reads sensitive data and 'http' sends data outside the "
-                    "session. Together they form an exfiltration path: anything the "
-                    "first tool reads can leave through the second without further "
-                    "approval."
+                    "Sensitive-read tools 'db' can pass what they read to outbound-write "
+                    "tools 'http' without further approval."
                 ),
                 "recommendation": (
-                    "Confirm 'db' and 'http' genuinely need to be enabled together. "
-                    "If they do, scope 'db' to the narrowest data it needs and "
-                    "require explicit approval for 'http' calls."
+                    "Confirm the sensitive-read tools 'db' and outbound-write tools "
+                    "'http' genuinely need to be enabled together. Scope each reader to "
+                    "the narrowest data it "
+                    "needs and require explicit approval for outbound calls."
                 ),
             }
         ],
         "summary": (
-            "1 finding(s): 1 data-exfiltration pairing(s) and 0 prompt-injection "
-            "pairing(s)."
+            "1 finding(s): 1 data-exfiltration risk(s) and 0 prompt-injection risk(s)."
         ),
         "limitations": LIMITATIONS,
     }
@@ -129,20 +130,18 @@ async def test_untrusted_ingest_with_privileged_action_reports_injection():
                 "severity": "high",
                 "tools": ["fetch", "shell"],
                 "description": (
-                    "'fetch' ingests content controlled by someone else and 'shell' "
-                    "takes privileged actions. Instructions hidden in what the first "
-                    "tool fetches can steer the model into calling the second."
+                    "Untrusted-ingest tools 'fetch' can expose privileged-action "
+                    "tools 'shell' to hidden instructions that steer later calls."
                 ),
                 "recommendation": (
-                    "Treat everything 'fetch' returns as untrusted data rather than "
-                    "instructions, and require explicit approval for 'shell' calls "
-                    "that follow it."
+                    "Treat everything returned by 'fetch' as untrusted data rather "
+                    "than instructions, and require explicit approval for calls to "
+                    "'shell' that follow it."
                 ),
             }
         ],
         "summary": (
-            "1 finding(s): 0 data-exfiltration pairing(s) and 1 prompt-injection "
-            "pairing(s)."
+            "1 finding(s): 0 data-exfiltration risk(s) and 1 prompt-injection risk(s)."
         ),
         "limitations": LIMITATIONS,
     }
@@ -196,8 +195,7 @@ async def test_single_tool_carrying_both_sides_of_a_pairing_is_reported():
         },
     ]
     assert result["summary"] == (
-        "2 finding(s): 1 data-exfiltration pairing(s) and 1 prompt-injection "
-        "pairing(s)."
+        "2 finding(s): 1 data-exfiltration risk(s) and 1 prompt-injection risk(s)."
     )
 
 
@@ -256,11 +254,69 @@ async def test_findings_do_not_depend_on_inventory_order():
         assert await assess(list(ordering)) == expected
 
     assert [(f["id"], f["category"], f["tools"]) for f in expected["findings"]] == [
-        ("RISK-001", "data-exfiltration", ["db", "http"]),
-        ("RISK-002", "data-exfiltration", ["db", "shell"]),
-        ("RISK-003", "data-exfiltration", ["fetch", "http"]),
-        ("RISK-004", "data-exfiltration", ["fetch", "shell"]),
-        ("RISK-005", "prompt-injection", ["fetch", "shell"]),
+        ("RISK-001", "data-exfiltration", ["db", "fetch", "http", "shell"]),
+        ("RISK-002", "prompt-injection", ["fetch", "shell"]),
+    ]
+
+
+async def test_rule_groups_multiple_sources_and_sinks_into_one_finding():
+    result = await assess(
+        [
+            {"name": "vault", "capabilities": ["sensitive-read"]},
+            {"name": "db", "capabilities": ["sensitive-read"]},
+            {"name": "slack", "capabilities": ["outbound-write"]},
+            {"name": "http", "capabilities": ["outbound-write"]},
+        ]
+    )
+
+    assert result["findings"] == [
+        {
+            "id": "RISK-001",
+            "category": "data-exfiltration",
+            "severity": "high",
+            "tools": ["db", "http", "slack", "vault"],
+            "description": (
+                "Sensitive-read tools 'db' and 'vault' can pass what they read to "
+                "outbound-write tools 'http' and 'slack' without further approval."
+            ),
+            "recommendation": (
+                "Confirm the sensitive-read tools 'db' and 'vault' and outbound-write "
+                "tools 'http' and 'slack' genuinely need to be enabled together. Scope "
+                "each reader to the narrowest data it needs and require explicit "
+                "approval for outbound calls."
+            ),
+        }
+    ]
+
+
+async def test_self_path_is_called_out_inside_a_grouped_rule_finding():
+    result = await assess(
+        [
+            {"name": "mail", "capabilities": ["sensitive-read", "outbound-write"]},
+            {"name": "vault", "capabilities": ["sensitive-read"]},
+            {"name": "http", "capabilities": ["outbound-write"]},
+        ]
+    )
+
+    assert result["findings"] == [
+        {
+            "id": "RISK-001",
+            "category": "data-exfiltration",
+            "severity": "high",
+            "tools": ["http", "mail", "vault"],
+            "description": (
+                "Sensitive-read tools 'mail' and 'vault' can pass what they read to "
+                "outbound-write tools 'http' and 'mail' without further approval. Any tool "
+                "appearing in both roles ('mail') can form one call chain within that "
+                "single tool."
+            ),
+            "recommendation": (
+                "Confirm the sensitive-read tools 'mail' and 'vault' and outbound-write "
+                "tools 'http' and 'mail' genuinely need to be enabled together. Scope "
+                "each reader to the narrowest data it needs and require explicit "
+                "approval for outbound calls."
+            ),
+        }
     ]
 
 
@@ -296,3 +352,14 @@ async def test_result_documents_the_self_report_limitation():
     assert "self-report" in result["limitations"]
     assert "not a clean bill of health" in result["limitations"]
     assert "in-session advisor" in result["limitations"]
+
+
+async def test_readme_example_matches_assess_output_exactly():
+    readme = Path("README.md").read_text()
+    call = re.search(r"### Example call\n\n```json\n(.*?)\n```", readme, re.DOTALL)
+    documented = re.search(r"### Example result\n\n```json\n(.*?)\n```", readme, re.DOTALL)
+
+    assert call is not None
+    assert documented is not None
+    payload = json.loads(call.group(1))
+    assert await assess(payload["tool_inventory"]) == json.loads(documented.group(1))

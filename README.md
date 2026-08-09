@@ -77,20 +77,20 @@ accepted — anything else fails schema validation rather than being silently ig
       "category": "data-exfiltration",
       "severity": "high",
       "tools": ["postgres", "slack"],
-      "description": "'postgres' reads sensitive data and 'slack' sends data outside the session. ...",
-      "recommendation": "Confirm 'postgres' and 'slack' genuinely need to be enabled together. ..."
+      "description": "Sensitive-read tools 'postgres' can pass what they read to outbound-write tools 'slack' without further approval.",
+      "recommendation": "Confirm the sensitive-read tools 'postgres' and outbound-write tools 'slack' genuinely need to be enabled together. Scope each reader to the narrowest data it needs and require explicit approval for outbound calls."
     },
     {
       "id": "RISK-002",
       "category": "prompt-injection",
       "severity": "high",
-      "tools": ["slack", "bash"],
-      "description": "'slack' ingests content controlled by someone else and 'bash' takes privileged actions. ...",
-      "recommendation": "Treat everything 'slack' returns as untrusted data rather than instructions. ..."
+      "tools": ["bash", "slack"],
+      "description": "Untrusted-ingest tools 'slack' can expose privileged-action tools 'bash' to hidden instructions that steer later calls.",
+      "recommendation": "Treat everything returned by 'slack' as untrusted data rather than instructions, and require explicit approval for calls to 'bash' that follow it."
     }
   ],
-  "summary": "2 finding(s): 1 data-exfiltration pairing(s) and 1 prompt-injection pairing(s).",
-  "limitations": "..."
+  "summary": "2 finding(s): 1 data-exfiltration risk(s) and 1 prompt-injection risk(s).",
+  "limitations": "Sentinel analyzes only the inventory it was given. That inventory is a self-report from the calling model, so a tool it omits or mis-tags is invisible here, and a clean result is not a clean bill of health. Sentinel is an in-session advisor: it does not enumerate tools itself, read configuration files, scan source, emit SARIF, or run in CI, and it never changes permissions or blocks a call."
 }
 ```
 
@@ -101,10 +101,12 @@ Sentinel checks two capability pairings, deliberately and only these:
 - `sensitive-read` × `outbound-write` — a data-exfiltration path
 - `untrusted-ingest` × `privileged-action` — untrusted content steering a privileged call
 
-A single tool carrying both sides of a pairing is reported too. Findings come back in a
-stable order (exfiltration pairings first, then injection pairings, each sorted by tool
-name) with fixed severities, descriptions, and recommendations. Inventory order and
-duplicate entries or capabilities do not change the output.
+Each completed rule produces one finding that enumerates all source tools and sink tools,
+so an inventory produces at most two findings. A tool carrying both sides of a pairing is
+called out as a single-tool path within that rule's finding. Findings come back in a stable
+order (exfiltration first, then injection), with tool names sorted and fixed severities,
+descriptions, and recommendations. Inventory order and duplicate entries or capabilities
+do not change the output.
 
 ## Limitations
 

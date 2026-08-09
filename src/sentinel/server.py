@@ -133,8 +133,8 @@ def _summary(findings: list[Finding]) -> str:
     exfiltration = sum(1 for f in findings if f.category == EXFILTRATION_CATEGORY)
     injection = len(findings) - exfiltration
     return (
-        f"{len(findings)} finding(s): {exfiltration} data-exfiltration pairing(s) "
-        f"and {injection} prompt-injection pairing(s)."
+        f"{len(findings)} finding(s): {exfiltration} data-exfiltration risk(s) "
+        f"and {injection} prompt-injection risk(s)."
     )
 
 
@@ -143,8 +143,16 @@ def _names_with(inventory: list[ToolEntry], capability: Capability) -> list[str]
     return sorted({entry.name for entry in inventory if capability in entry.capabilities})
 
 
-def _exfiltration_finding(reader: str, writer: str) -> tuple[str, str, list[str]]:
-    if reader == writer:
+def _quoted_names(names: list[str]) -> str:
+    quoted = [f"'{name}'" for name in names]
+    if len(quoted) == 1:
+        return quoted[0]
+    return f"{', '.join(quoted[:-1])} and {quoted[-1]}"
+
+
+def _exfiltration_finding(readers: list[str], writers: list[str]) -> tuple[str, str, list[str]]:
+    if readers == writers and len(readers) == 1:
+        reader = readers[0]
         return (
             f"'{reader}' both reads sensitive data and sends data outside the "
             "session, so one call chain within this single tool is enough to "
@@ -153,19 +161,29 @@ def _exfiltration_finding(reader: str, writer: str) -> tuple[str, str, list[str]
             "approval before it sends anything outbound.",
             [reader],
         )
+    reader_names = _quoted_names(readers)
+    writer_names = _quoted_names(writers)
+    overlap = sorted(set(readers) & set(writers))
+    self_path = (
+        f" Any tool appearing in both roles ({_quoted_names(overlap)}) can form one "
+        "call chain within that single tool."
+        if overlap
+        else ""
+    )
     return (
-        f"'{reader}' reads sensitive data and '{writer}' sends data outside the "
-        "session. Together they form an exfiltration path: anything the first "
-        "tool reads can leave through the second without further approval.",
-        f"Confirm '{reader}' and '{writer}' genuinely need to be enabled together. "
-        f"If they do, scope '{reader}' to the narrowest data it needs and require "
-        f"explicit approval for '{writer}' calls.",
-        [reader, writer],
+        f"Sensitive-read tools {reader_names} can pass what they read to outbound-write "
+        f"tools {writer_names} without further approval.{self_path}",
+        f"Confirm the sensitive-read tools {reader_names} and outbound-write tools "
+        f"{writer_names} genuinely "
+        "need to be enabled together. Scope each reader to the narrowest data it "
+        "needs and require explicit approval for outbound calls.",
+        sorted(set(readers) | set(writers)),
     )
 
 
-def _injection_finding(ingest: str, action: str) -> tuple[str, str, list[str]]:
-    if ingest == action:
+def _injection_finding(ingests: list[str], actions: list[str]) -> tuple[str, str, list[str]]:
+    if ingests == actions and len(ingests) == 1:
+        ingest = ingests[0]
         return (
             f"'{ingest}' both ingests untrusted content and takes privileged "
             "actions, so content it pulls in can steer its own later calls.",
@@ -174,14 +192,22 @@ def _injection_finding(ingest: str, action: str) -> tuple[str, str, list[str]]:
             "content.",
             [ingest],
         )
+    ingest_names = _quoted_names(ingests)
+    action_names = _quoted_names(actions)
+    overlap = sorted(set(ingests) & set(actions))
+    self_path = (
+        f" For any tool appearing in both roles ({_quoted_names(overlap)}), content "
+        "it pulls in can steer its own later calls."
+        if overlap
+        else ""
+    )
     return (
-        f"'{ingest}' ingests content controlled by someone else and '{action}' "
-        "takes privileged actions. Instructions hidden in what the first tool "
-        "fetches can steer the model into calling the second.",
-        f"Treat everything '{ingest}' returns as untrusted data rather than "
-        f"instructions, and require explicit approval for '{action}' calls that "
-        f"follow it.",
-        [ingest, action],
+        f"Untrusted-ingest tools {ingest_names} can expose privileged-action "
+        f"tools {action_names} to hidden instructions that steer later calls.{self_path}",
+        f"Treat everything returned by {ingest_names} as untrusted data rather than "
+        f"instructions, and require explicit approval for calls to {action_names} "
+        "that follow it.",
+        sorted(set(ingests) | set(actions)),
     )
 
 
@@ -207,19 +233,18 @@ def _analyze(inventory: list[ToolEntry]) -> Assessment:
     )
 
     for category, severity, build, sources, sinks in pairings:
-        for source in sources:
-            for sink in sinks:
-                description, recommendation, tools = build(source, sink)
-                findings.append(
-                    Finding(
-                        id=f"RISK-{len(findings) + 1:03d}",
-                        category=category,
-                        severity=severity,
-                        tools=tools,
-                        description=description,
-                        recommendation=recommendation,
-                    )
+        if sources and sinks:
+            description, recommendation, tools = build(sources, sinks)
+            findings.append(
+                Finding(
+                    id=f"RISK-{len(findings) + 1:03d}",
+                    category=category,
+                    severity=severity,
+                    tools=tools,
+                    description=description,
+                    recommendation=recommendation,
                 )
+            )
 
     return Assessment(findings=findings, summary=_summary(findings), limitations=LIMITATIONS)
 
