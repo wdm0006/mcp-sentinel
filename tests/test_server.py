@@ -17,12 +17,14 @@ from fastmcp.exceptions import ToolError
 
 from sentinel.server import (
     CAPABILITY_DESCRIPTIONS,
+    EMPTY_INVENTORY_SUMMARY,
     EXFILTRATION_CATEGORY,
     EXFILTRATION_SEVERITY,
     INJECTION_CATEGORY,
     INJECTION_SEVERITY,
     LIMITATIONS,
     NO_FINDINGS_SUMMARY,
+    UNTAGGED_INVENTORY_SUMMARY,
     Capability,
     mcp,
 )
@@ -236,11 +238,6 @@ async def test_single_tool_carrying_both_sides_of_a_pairing_is_reported():
 @pytest.mark.parametrize(
     "inventory",
     [
-        pytest.param([], id="empty"),
-        pytest.param(
-            [{"name": "notes", "capabilities": []}],
-            id="untagged-tool",
-        ),
         pytest.param(
             [
                 {"name": "db", "capabilities": ["sensitive-read"]},
@@ -270,6 +267,51 @@ async def test_incomplete_pairings_return_a_stable_no_findings_result(inventory)
         "summary": NO_FINDINGS_SUMMARY,
         "limitations": LIMITATIONS,
     }
+
+
+async def test_empty_inventory_says_nothing_was_submitted():
+    """An empty inventory is a caller failure, not a clean result."""
+    result = await assess([])
+
+    assert result == {
+        "findings": [],
+        "summary": EMPTY_INVENTORY_SUMMARY,
+        "limitations": LIMITATIONS,
+    }
+    # The exact string is what the assistant relays, so it must not read as an all-clear.
+    assert "No risky capability pairing found" not in result["summary"]
+
+
+async def test_inventory_with_no_tagged_capability_says_nothing_was_tagged():
+    """Tools listed but never tagged means the analysis never ran."""
+    result = await assess(
+        [
+            {"name": "notes", "capabilities": []},
+            {"name": "calc", "capabilities": []},
+        ]
+    )
+
+    assert result == {
+        "findings": [],
+        "summary": UNTAGGED_INVENTORY_SUMMARY,
+        "limitations": LIMITATIONS,
+    }
+    assert "No risky capability pairing found" not in result["summary"]
+    # And distinct from the empty-inventory case, which is a different caller failure.
+    assert result["summary"] != EMPTY_INVENTORY_SUMMARY
+
+
+async def test_one_tagged_tool_among_untagged_ones_uses_the_pairing_summary():
+    """A single tagged tool means the pairings really were evaluated and came up short."""
+    result = await assess(
+        [
+            {"name": "notes", "capabilities": []},
+            {"name": "db", "capabilities": ["sensitive-read"]},
+        ]
+    )
+
+    assert result["findings"] == []
+    assert result["summary"] == NO_FINDINGS_SUMMARY
 
 
 INVENTORY = [
