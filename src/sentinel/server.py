@@ -86,30 +86,52 @@ class ToolEntry(BaseModel):
     )
 
 
-class Finding(BaseModel):
-    """A single capability-pairing finding."""
-
-    id: str
-    category: str
-    severity: str
-    tools: list[str]
-    description: str
-    recommendation: str
-
-
-class Assessment(BaseModel):
-    """The full result of one assess call."""
-
-    findings: list[Finding]
-    summary: str
-    limitations: str
-
-
 EXFILTRATION_CATEGORY = "data-exfiltration"
 INJECTION_CATEGORY = "prompt-injection"
 
 EXFILTRATION_SEVERITY = "high"
 INJECTION_SEVERITY = "high"
+
+
+class Finding(BaseModel):
+    """A single capability-pairing finding."""
+
+    id: str = Field(description="Stable identifier for this finding, such as RISK-001.")
+    category: str = Field(
+        description=(
+            "Risk category. Allowed values: "
+            f"{EXFILTRATION_CATEGORY} or {INJECTION_CATEGORY}."
+        )
+    )
+    severity: str = Field(
+        description=(
+            "Fixed severity, not a graded or computed score. Allowed values emitted by "
+            f"Sentinel: {EXFILTRATION_SEVERITY} or {INJECTION_SEVERITY}."
+        )
+    )
+    tools: list[str] = Field(
+        description="Sorted tool names involved in this capability-pairing risk."
+    )
+    description: str = Field(description="Explanation of the risky capability flow.")
+    recommendation: str = Field(
+        description="Concrete guidance for reducing the risk described by this finding."
+    )
+
+
+class Assessment(BaseModel):
+    """The full result of one assess call."""
+
+    findings: list[Finding] = Field(
+        description="Security risks found in the supplied tool inventory."
+    )
+    summary: str = Field(description="Concise count and category summary of the findings.")
+    limitations: str = Field(
+        description=(
+            "Must be relayed to the user together with the findings: the inventory is a "
+            "self-report from the calling model, so omitted or mis-tagged tools are invisible "
+            "and an empty findings list is not a clean bill of health."
+        )
+    )
 
 NO_FINDINGS_SUMMARY = (
     "No risky capability pairing found. Sentinel checks two pairings only: "

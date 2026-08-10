@@ -17,6 +17,10 @@ from fastmcp.exceptions import ToolError
 
 from sentinel.server import (
     CAPABILITY_DESCRIPTIONS,
+    EXFILTRATION_CATEGORY,
+    EXFILTRATION_SEVERITY,
+    INJECTION_CATEGORY,
+    INJECTION_SEVERITY,
     LIMITATIONS,
     NO_FINDINGS_SUMMARY,
     Capability,
@@ -67,6 +71,35 @@ async def test_every_capability_meaning_reaches_the_calling_model():
         # And so must the tool description it reads before tagging anything.
         assert capability.value in tools[0].description
         assert meaning in tools[0].description
+
+
+async def test_every_assessment_field_description_reaches_the_calling_model():
+    async with Client(mcp) as client:
+        tools = await client.list_tools()
+
+    schema = tools[0].outputSchema
+    assessment_fields = schema["properties"]
+    for field in ("findings", "summary", "limitations"):
+        assert assessment_fields[field]["description"]
+
+    limitations_description = assessment_fields["limitations"]["description"]
+    assert "relayed to the user together with the findings" in limitations_description
+
+    finding_schema = assessment_fields["findings"]["items"]
+    if "$ref" in finding_schema:
+        finding_schema = schema["$defs"][finding_schema["$ref"].rsplit("/", 1)[-1]]
+    finding_fields = finding_schema["properties"]
+    for field in ("id", "category", "severity", "tools", "description", "recommendation"):
+        assert finding_fields[field]["description"]
+
+    category_description = finding_fields["category"]["description"]
+    assert EXFILTRATION_CATEGORY in category_description
+    assert INJECTION_CATEGORY in category_description
+
+    severity_description = finding_fields["severity"]["description"]
+    assert EXFILTRATION_SEVERITY in severity_description
+    assert INJECTION_SEVERITY in severity_description
+    assert "fixed" in severity_description.lower()
 
 
 async def test_unknown_capability_fails_validation():
