@@ -112,7 +112,9 @@ do not change the output.
 
 **The inventory is a self-report.** Sentinel does not enumerate your tools; it analyzes
 exactly what the calling model passes in. A tool the model omits or mis-tags is invisible
-here, so a result with no findings is not a clean bill of health.
+here, so a result with no findings is not a clean bill of health. The two ways of skipping
+the analysis entirely — submitting no tools, or submitting tools with no capabilities
+tagged — get their own summaries saying so, rather than the no-risky-pairing wording.
 
 **The rule set is narrow by design.** Sentinel reports two pairings. It says nothing
 about over-broad scopes, missing authentication, lateral movement, or anything else.

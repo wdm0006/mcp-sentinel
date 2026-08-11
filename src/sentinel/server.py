@@ -139,6 +139,20 @@ NO_FINDINGS_SUMMARY = (
     "privileged-action. Neither is complete in this inventory."
 )
 
+EMPTY_INVENTORY_SUMMARY = (
+    "No tools were submitted, so nothing was analyzed. This is not a clean result: "
+    "Sentinel only sees the inventory it is given. Call assess again with every tool "
+    "this session can reach, each tagged with the capability categories it carries."
+)
+
+UNTAGGED_INVENTORY_SUMMARY = (
+    "Tools were submitted but none of them carries a capability, so neither pairing "
+    "could be evaluated and nothing was analyzed. This is not a clean result: tag each "
+    "tool with the capability categories it carries - sensitive-read, outbound-write, "
+    "untrusted-ingest, privileged-action, as described in this tool's description - and "
+    "call assess again."
+)
+
 LIMITATIONS = (
     "Sentinel analyzes only the inventory it was given. That inventory is a "
     "self-report from the calling model, so a tool it omits or mis-tags is "
@@ -149,8 +163,12 @@ LIMITATIONS = (
 )
 
 
-def _summary(findings: list[Finding]) -> str:
+def _summary(findings: list[Finding], inventory: list[ToolEntry]) -> str:
     if not findings:
+        if not inventory:
+            return EMPTY_INVENTORY_SUMMARY
+        if not any(entry.capabilities for entry in inventory):
+            return UNTAGGED_INVENTORY_SUMMARY
         return NO_FINDINGS_SUMMARY
     exfiltration = sum(1 for f in findings if f.category == EXFILTRATION_CATEGORY)
     injection = len(findings) - exfiltration
@@ -268,7 +286,11 @@ def _analyze(inventory: list[ToolEntry]) -> Assessment:
                 )
             )
 
-    return Assessment(findings=findings, summary=_summary(findings), limitations=LIMITATIONS)
+    return Assessment(
+        findings=findings,
+        summary=_summary(findings, inventory),
+        limitations=LIMITATIONS,
+    )
 
 
 ASSESS_DESCRIPTION = f"""Assess an MCP tool surface for risky capability pairings.
