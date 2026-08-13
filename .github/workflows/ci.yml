@@ -34,3 +34,23 @@ jobs:
 
       - name: Run tests (pytest)
         run: uv run pytest
+
+  test-dependency-floor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install project at dependency floors
+        run: uv sync --resolution lowest-direct
+
+      - name: Run tests (pytest)
+        run: uv run pytest
+        env:
+          UV_NO_SYNC: "1"
