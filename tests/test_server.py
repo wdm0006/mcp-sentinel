@@ -144,7 +144,8 @@ async def test_sensitive_read_with_outbound_write_reports_exfiltration():
             }
         ],
         "summary": (
-            "1 finding(s): 1 data-exfiltration risk(s) and 0 prompt-injection risk(s)."
+            "1 risk found. Data exfiltration: 1 sensitive-read tool can reach "
+            "1 outbound-write tool."
         ),
         "limitations": LIMITATIONS,
     }
@@ -177,7 +178,8 @@ async def test_untrusted_ingest_with_privileged_action_reports_injection():
             }
         ],
         "summary": (
-            "1 finding(s): 0 data-exfiltration risk(s) and 1 prompt-injection risk(s)."
+            "1 risk found. Prompt injection: 1 untrusted-ingest tool can reach "
+            "1 privileged-action tool."
         ),
         "limitations": LIMITATIONS,
     }
@@ -231,7 +233,30 @@ async def test_single_tool_carrying_both_sides_of_a_pairing_is_reported():
         },
     ]
     assert result["summary"] == (
-        "2 finding(s): 1 data-exfiltration risk(s) and 1 prompt-injection risk(s)."
+        "2 risks found. Data exfiltration: 1 sensitive-read tool can reach "
+        "1 outbound-write tool. Prompt injection: 1 untrusted-ingest tool can reach "
+        "1 privileged-action tool."
+    )
+
+
+async def test_summary_reports_asymmetric_role_counts_for_both_rules():
+    result = await assess(
+        [
+            {"name": "db", "capabilities": ["sensitive-read"]},
+            {"name": "files", "capabilities": ["sensitive-read"]},
+            {"name": "mail-read", "capabilities": ["sensitive-read"]},
+            {"name": "http", "capabilities": ["outbound-write"]},
+            {"name": "mail-send", "capabilities": ["outbound-write"]},
+            {"name": "fetch", "capabilities": ["untrusted-ingest"]},
+            {"name": "issues", "capabilities": ["untrusted-ingest"]},
+            {"name": "shell", "capabilities": ["privileged-action"]},
+        ]
+    )
+
+    assert result["summary"] == (
+        "2 risks found. Data exfiltration: 3 sensitive-read tools can reach "
+        "2 outbound-write tools. Prompt injection: 2 untrusted-ingest tools can reach "
+        "1 privileged-action tool."
     )
 
 

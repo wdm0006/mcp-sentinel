@@ -124,7 +124,12 @@ class Assessment(BaseModel):
     findings: list[Finding] = Field(
         description="Security risks found in the supplied tool inventory."
     )
-    summary: str = Field(description="Concise count and category summary of the findings.")
+    summary: str = Field(
+        description=(
+            "Concise summary of each completed capability pairing, including the number "
+            "of source and sink tools involved."
+        )
+    )
     limitations: str = Field(
         description=(
             "Must be relayed to the user together with the findings: the inventory is a "
@@ -170,12 +175,26 @@ def _summary(findings: list[Finding], inventory: list[ToolEntry]) -> str:
         if not any(entry.capabilities for entry in inventory):
             return UNTAGGED_INVENTORY_SUMMARY
         return NO_FINDINGS_SUMMARY
-    exfiltration = sum(1 for f in findings if f.category == EXFILTRATION_CATEGORY)
-    injection = len(findings) - exfiltration
-    return (
-        f"{len(findings)} finding(s): {exfiltration} data-exfiltration risk(s) "
-        f"and {injection} prompt-injection risk(s)."
-    )
+    parts = [f"{len(findings)} {'risk' if len(findings) == 1 else 'risks'} found."]
+    if any(f.category == EXFILTRATION_CATEGORY for f in findings):
+        readers = _names_with(inventory, Capability.SENSITIVE_READ)
+        writers = _names_with(inventory, Capability.OUTBOUND_WRITE)
+        parts.append(
+            "Data exfiltration: "
+            f"{len(readers)} sensitive-read {'tool' if len(readers) == 1 else 'tools'} "
+            "can reach "
+            f"{len(writers)} outbound-write {'tool' if len(writers) == 1 else 'tools'}."
+        )
+    if any(f.category == INJECTION_CATEGORY for f in findings):
+        ingests = _names_with(inventory, Capability.UNTRUSTED_INGEST)
+        actions = _names_with(inventory, Capability.PRIVILEGED_ACTION)
+        parts.append(
+            "Prompt injection: "
+            f"{len(ingests)} untrusted-ingest {'tool' if len(ingests) == 1 else 'tools'} "
+            "can reach "
+            f"{len(actions)} privileged-action {'tool' if len(actions) == 1 else 'tools'}."
+        )
+    return " ".join(parts)
 
 
 def _names_with(inventory: list[ToolEntry], capability: Capability) -> list[str]:
