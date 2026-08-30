@@ -54,3 +54,33 @@ jobs:
         run: uv run pytest
         env:
           UV_NO_SYNC: "1"
+
+  test-built-wheel:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Build wheel
+        run: uv build
+
+      - name: Install wheel in clean environment
+        run: |
+          uv venv "$RUNNER_TEMP/sentinel-wheel" --python 3.12
+          uv pip install --python "$RUNNER_TEMP/sentinel-wheel/bin/python" dist/*.whl
+
+      - name: Import installed server outside checkout
+        run: |
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/sentinel-wheel/bin/python" -c "import sentinel.server"
+
+      - name: Start installed console script outside checkout
+        run: |
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/sentinel-wheel/bin/sentinel" < /dev/null
