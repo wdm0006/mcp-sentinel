@@ -37,13 +37,26 @@ async def assess(inventory):
     return result.structured_content
 
 
+def _tool_attr(tool: object, canonical: str, alias: str):
+    """Read a Tool field by its canonical snake_case name, with a floor fallback.
+
+    fastmcp 4.x exposes the camelCase names only as deprecated aliases, so the
+    canonical name must be preferred. The dependency floor (fastmcp 2.14.6)
+    returns ``mcp.types.Tool``, which predates the rename and only carries the
+    camelCase names - hence the fallback.
+    """
+    if hasattr(tool, canonical):
+        return getattr(tool, canonical)
+    return getattr(tool, alias)
+
+
 async def test_only_assess_is_registered_and_takes_a_structured_inventory():
     async with Client(mcp) as client:
         tools = await client.list_tools()
 
     assert [tool.name for tool in tools] == ["assess"]
 
-    schema = tools[0].inputSchema
+    schema = _tool_attr(tools[0], "input_schema", "inputSchema")
     assert schema["required"] == ["tool_inventory"]
     # No injected Context parameter, and nothing else to pass.
     assert list(schema["properties"]) == ["tool_inventory"]
@@ -62,7 +75,9 @@ async def test_every_capability_meaning_reaches_the_calling_model():
     async with Client(mcp) as client:
         tools = await client.list_tools()
 
-    entry = tools[0].inputSchema["properties"]["tool_inventory"]["items"]
+    entry = _tool_attr(tools[0], "input_schema", "inputSchema")["properties"]["tool_inventory"][
+        "items"
+    ]
     field_description = entry["properties"]["capabilities"]["description"]
 
     for capability in Capability:
@@ -79,7 +94,7 @@ async def test_every_assessment_field_description_reaches_the_calling_model():
     async with Client(mcp) as client:
         tools = await client.list_tools()
 
-    schema = tools[0].outputSchema
+    schema = _tool_attr(tools[0], "output_schema", "outputSchema")
     assessment_fields = schema["properties"]
     for field in ("findings", "summary", "limitations"):
         assert assessment_fields[field]["description"]
