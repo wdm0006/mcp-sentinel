@@ -16,6 +16,8 @@ dependencies = [
 
 [project.scripts]
 sentinel = "sentinel.server:main"
+# Same entry point under the PyPI project name (issue #25: naming pending review).
+sentinel-security-advisor = "sentinel.server:main"
 
 [dependency-groups]
 dev = [
