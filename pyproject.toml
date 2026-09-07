@@ -21,16 +21,31 @@ sentinel-security-advisor = "sentinel.server:main"
 
 [dependency-groups]
 dev = [
+    "mutmut==3.7.0",
     "mypy>=2.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=7.0.0",
+    "pytest-timeout>=2.4.0",
     # Exact pin: the lint/format gate must run the same ruff everywhere.
     "ruff==0.16.6",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Collect only the real suite: the mutmut shadow tree (mutants/tests/) has the
+# same test basenames and would collide on import during plain pytest runs.
+testpaths = ["tests"]
+# A hung mutant must not wedge the campaign; the suite normally runs in ~1.5s.
+timeout = 60
+
+[tool.mutmut]
+# The rule-engine module is the mutation target; explicit source_paths is the
+# mutmut 3.7.0 form (tests_dir is deprecated).
+source_paths = ["src/sentinel/server.py"]
+# The shadow tree only gets Python sources and pyproject.toml; the README
+# guard tests read README.md at the repo root, so copy it in as well.
+also_copy = ["README.md"]
 
 [tool.mypy]
 python_version = "3.12"
