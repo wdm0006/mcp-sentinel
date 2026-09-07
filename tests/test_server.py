@@ -26,6 +26,7 @@ from sentinel.server import (
     NO_FINDINGS_SUMMARY,
     UNTAGGED_INVENTORY_SUMMARY,
     Capability,
+    main,
     mcp,
 )
 
@@ -521,3 +522,25 @@ def test_readme_uvx_commands_name_a_declared_console_script():
         assert executable in scripts, (
             f"README runs `uvx ... {executable}`, but [project.scripts] declares {scripts}"
         )
+
+
+def test_main_runs_the_stdio_server(monkeypatch):
+    """main() is the console-script entry point: it starts the stdio server."""
+    started = []
+    monkeypatch.setattr(mcp, "run", lambda: started.append(True))
+
+    main()
+
+    assert started == [True]
+
+
+def test_main_reraises_interrupts(monkeypatch):
+    """Ctrl-C while serving propagates so the process keeps its signal exit status."""
+
+    def interrupt():
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(mcp, "run", interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        main()

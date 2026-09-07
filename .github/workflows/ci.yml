@@ -39,7 +39,7 @@ jobs:
         run: uv run mypy src/
 
       - name: Run tests with coverage gate (pytest)
-        run: uv run pytest --cov=src/sentinel --cov-report=term-missing --cov-fail-under=95.8
+        run: uv run pytest --cov=src/sentinel --cov-report=term-missing --cov-fail-under=97.2
 
   test-dependency-floor:
     runs-on: ubuntu-latest
