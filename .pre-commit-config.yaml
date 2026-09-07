@@ -1,0 +1,9 @@
+# The ruff revision must match the version pinned in the dev dependency group
+# (pyproject.toml), which is the version the CI lint gate runs.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format

@@ -29,11 +29,17 @@ jobs:
       - name: Install project
         run: uv sync
 
-      - name: Lint (ruff)
-        run: uv run --with ruff ruff check .
+      - name: Lint (ruff check)
+        run: uv run ruff check .
 
-      - name: Run tests (pytest)
-        run: uv run pytest
+      - name: Check formatting (ruff format)
+        run: uv run ruff format --check .
+
+      - name: Type-check (mypy, strict)
+        run: uv run mypy src/
+
+      - name: Run tests with coverage gate (pytest)
+        run: uv run pytest --cov=src/sentinel --cov-report=term-missing --cov-fail-under=95.8
 
   test-dependency-floor:
     runs-on: ubuntu-latest

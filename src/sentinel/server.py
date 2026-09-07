@@ -51,8 +51,7 @@ CAPABILITY_DESCRIPTIONS = {
         "trackers, shared files)"
     ),
     Capability.PRIVILEGED_ACTION: (
-        "takes actions with consequences (code execution, writes, deployments, "
-        "permission changes)"
+        "takes actions with consequences (code execution, writes, deployments, permission changes)"
     ),
 }
 
@@ -99,8 +98,7 @@ class Finding(BaseModel):
     id: str = Field(description="Stable identifier for this finding, such as RISK-001.")
     category: str = Field(
         description=(
-            "Risk category. Allowed values: "
-            f"{EXFILTRATION_CATEGORY} or {INJECTION_CATEGORY}."
+            f"Risk category. Allowed values: {EXFILTRATION_CATEGORY} or {INJECTION_CATEGORY}."
         )
     )
     severity: str = Field(
@@ -137,6 +135,7 @@ class Assessment(BaseModel):
             "and an empty findings list is not a clean bill of health."
         )
     )
+
 
 NO_FINDINGS_SUMMARY = (
     "No risky capability pairing found. Sentinel checks two pairings only: "
@@ -337,7 +336,7 @@ def assess(tool_inventory: list[ToolEntry]) -> Assessment:
     return _analyze(tool_inventory)
 
 
-def main():
+def main() -> None:
     mcp.run()
 
 
