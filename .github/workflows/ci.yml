@@ -39,7 +39,11 @@ jobs:
         run: uv run mypy src/
 
       - name: Run tests with coverage gate (pytest)
-        run: uv run pytest --cov=src/sentinel --cov-report=term-missing --cov-fail-under=97.2
+        # --cov-precision=1 makes the fail-under comparison use the same
+        # decimal precision as the 97.2 threshold; pytest-cov's default
+        # precision of 0 rounds the total to an integer first, which would
+        # silently turn this gate into a 98% requirement.
+        run: uv run pytest --cov=src/sentinel --cov-report=term-missing --cov-fail-under=97.2 --cov-precision=1
 
   test-dependency-floor:
     runs-on: ubuntu-latest
