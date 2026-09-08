@@ -1,0 +1,5 @@
+# Repository policy for obvious agents — auto-detected from GitHub repo settings.
+repo: wdm0006/mcp-sentinel
+defaultBranch: main
+mergeMethod: squash
+requireHumanMerge: true
