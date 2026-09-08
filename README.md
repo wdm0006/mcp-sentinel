@@ -20,12 +20,18 @@ findings.
 # Run directly with uvx
 uvx --from git+https://github.com/wdm0006/mcp-sentinel sentinel
 
+# The same server is also installed under the package-name script
+uvx --from git+https://github.com/wdm0006/mcp-sentinel sentinel-security-advisor
+
 # Or install from source
 git clone https://github.com/wdm0006/mcp-sentinel
 cd mcp-sentinel
 uv sync
 uv run sentinel
 ```
+
+Both console scripts start the identical server; `sentinel-security-advisor`
+matches the PyPI project name for discoverability.
 
 ## MCP client config
 

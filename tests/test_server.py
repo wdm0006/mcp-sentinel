@@ -6,6 +6,7 @@ values. No model, no sampling, no network.
 """
 
 import json
+import logging
 import re
 import tomllib
 from itertools import permutations
@@ -16,6 +17,7 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from sentinel.server import (
+    _capability_glossary,
     CAPABILITY_DESCRIPTIONS,
     EMPTY_INVENTORY_SUMMARY,
     EXFILTRATION_CATEGORY,
@@ -26,6 +28,7 @@ from sentinel.server import (
     NO_FINDINGS_SUMMARY,
     UNTAGGED_INVENTORY_SUMMARY,
     Capability,
+    main,
     mcp,
 )
 
@@ -37,13 +40,26 @@ async def assess(inventory):
     return result.structured_content
 
 
+def _tool_attr(tool: object, canonical: str, alias: str):
+    """Read a Tool field by its canonical snake_case name, with a floor fallback.
+
+    fastmcp 4.x exposes the camelCase names only as deprecated aliases, so the
+    canonical name must be preferred. The dependency floor (fastmcp 2.14.6)
+    returns ``mcp.types.Tool``, which predates the rename and only carries the
+    camelCase names - hence the fallback.
+    """
+    if hasattr(tool, canonical):
+        return getattr(tool, canonical)
+    return getattr(tool, alias)
+
+
 async def test_only_assess_is_registered_and_takes_a_structured_inventory():
     async with Client(mcp) as client:
         tools = await client.list_tools()
 
     assert [tool.name for tool in tools] == ["assess"]
 
-    schema = tools[0].inputSchema
+    schema = _tool_attr(tools[0], "input_schema", "inputSchema")
     assert schema["required"] == ["tool_inventory"]
     # No injected Context parameter, and nothing else to pass.
     assert list(schema["properties"]) == ["tool_inventory"]
@@ -58,11 +74,40 @@ async def test_only_assess_is_registered_and_takes_a_structured_inventory():
     ]
 
 
+def test_capability_glossary_renders_the_schema_text_exactly():
+    """The glossary feeds the schema and tool description the calling model reads.
+
+    Pinned exactly: the wording is contract, and the renderer runs at import
+    time, so a drifted glossary would silently change what models see.
+    """
+    assert _capability_glossary("{value} - {meaning}", "; ") == (
+        "sensitive-read - reads data the session should not leak (files, databases, "
+        "mail, secrets); "
+        "outbound-write - sends data outside the session (HTTP requests, email, chat, uploads); "
+        "untrusted-ingest - pulls in content controlled by someone else (web pages, inboxes, "
+        "issue trackers, shared files); "
+        "privileged-action - takes actions with consequences (code execution, writes, "
+        "deployments, permission changes)"
+    )
+    assert _capability_glossary("- `{value}` - {meaning}.", "\n") == (
+        "- `sensitive-read` - reads data the session should not leak (files, databases, "
+        "mail, secrets).\n"
+        "- `outbound-write` - sends data outside the session (HTTP requests, email, chat, "
+        "uploads).\n"
+        "- `untrusted-ingest` - pulls in content controlled by someone else (web pages, inboxes, "
+        "issue trackers, shared files).\n"
+        "- `privileged-action` - takes actions with consequences (code execution, writes, "
+        "deployments, permission changes)."
+    )
+
+
 async def test_every_capability_meaning_reaches_the_calling_model():
     async with Client(mcp) as client:
         tools = await client.list_tools()
 
-    entry = tools[0].inputSchema["properties"]["tool_inventory"]["items"]
+    entry = _tool_attr(tools[0], "input_schema", "inputSchema")["properties"]["tool_inventory"][
+        "items"
+    ]
     field_description = entry["properties"]["capabilities"]["description"]
 
     for capability in Capability:
@@ -79,7 +124,7 @@ async def test_every_assessment_field_description_reaches_the_calling_model():
     async with Client(mcp) as client:
         tools = await client.list_tools()
 
-    schema = tools[0].outputSchema
+    schema = _tool_attr(tools[0], "output_schema", "outputSchema")
     assessment_fields = schema["properties"]
     for field in ("findings", "summary", "limitations"):
         assert assessment_fields[field]["description"]
@@ -390,6 +435,26 @@ async def test_rule_groups_multiple_sources_and_sinks_into_one_finding():
     ]
 
 
+async def test_three_sources_are_listed_comma_separated_with_a_final_and():
+    """The description's name-list rendering is exact for lists longer than two."""
+    result = await assess(
+        [
+            {"name": "db", "capabilities": ["sensitive-read"]},
+            {"name": "vault", "capabilities": ["sensitive-read"]},
+            {"name": "files", "capabilities": ["sensitive-read"]},
+            {"name": "http", "capabilities": ["outbound-write"]},
+        ]
+    )
+
+    assert result["findings"][0]["description"] == (
+        "Sensitive-read tools 'db', 'files' and 'vault' can pass what they read to "
+        "outbound-write tools 'http' without further approval."
+    )
+    assert result["summary"] == (
+        "1 risk found. Data exfiltration: 3 sensitive-read tools can reach 1 outbound-write tool."
+    )
+
+
 async def test_self_path_is_called_out_inside_a_grouped_rule_finding():
     result = await assess(
         [
@@ -506,3 +571,34 @@ def test_readme_uvx_commands_name_a_declared_console_script():
         assert executable in scripts, (
             f"README runs `uvx ... {executable}`, but [project.scripts] declares {scripts}"
         )
+
+
+def test_main_runs_the_stdio_server_and_logs_startup(monkeypatch, caplog):
+    """main() is the console-script entry point: it starts the stdio server."""
+    started = []
+    monkeypatch.setattr(mcp, "run", lambda: started.append(True))
+
+    with caplog.at_level(logging.INFO, logger="sentinel.server"):
+        main()
+
+    assert started == [True]
+    assert [record.getMessage() for record in caplog.records] == [
+        "starting the sentinel MCP server over stdio"
+    ]
+
+
+def test_main_logs_the_interrupt_before_reraising(monkeypatch, caplog):
+    """Ctrl-C while serving propagates so the process keeps its signal exit status."""
+
+    def interrupt():
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(mcp, "run", interrupt)
+
+    with caplog.at_level(logging.INFO, logger="sentinel.server"), pytest.raises(KeyboardInterrupt):
+        main()
+
+    assert [record.getMessage() for record in caplog.records] == [
+        "starting the sentinel MCP server over stdio",
+        "interrupted; stopping the sentinel MCP server",
+    ]

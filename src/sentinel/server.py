@@ -9,10 +9,14 @@ outbound writes, untrusted ingestion next to privileged actions.
 No sampling, no model provider, no API key, no persistence.
 """
 
+import logging
+from dataclasses import dataclass
 from enum import Enum
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "sentinel",
@@ -51,8 +55,7 @@ CAPABILITY_DESCRIPTIONS = {
         "trackers, shared files)"
     ),
     Capability.PRIVILEGED_ACTION: (
-        "takes actions with consequences (code execution, writes, deployments, "
-        "permission changes)"
+        "takes actions with consequences (code execution, writes, deployments, permission changes)"
     ),
 }
 
@@ -99,8 +102,7 @@ class Finding(BaseModel):
     id: str = Field(description="Stable identifier for this finding, such as RISK-001.")
     category: str = Field(
         description=(
-            "Risk category. Allowed values: "
-            f"{EXFILTRATION_CATEGORY} or {INJECTION_CATEGORY}."
+            f"Risk category. Allowed values: {EXFILTRATION_CATEGORY} or {INJECTION_CATEGORY}."
         )
     )
     severity: str = Field(
@@ -137,6 +139,7 @@ class Assessment(BaseModel):
             "and an empty findings list is not a clean bill of health."
         )
     )
+
 
 NO_FINDINGS_SUMMARY = (
     "No risky capability pairing found. Sentinel checks two pairings only: "
@@ -176,24 +179,11 @@ def _summary(findings: list[Finding], inventory: list[ToolEntry]) -> str:
             return UNTAGGED_INVENTORY_SUMMARY
         return NO_FINDINGS_SUMMARY
     parts = [f"{len(findings)} {'risk' if len(findings) == 1 else 'risks'} found."]
-    if any(f.category == EXFILTRATION_CATEGORY for f in findings):
-        readers = _names_with(inventory, Capability.SENSITIVE_READ)
-        writers = _names_with(inventory, Capability.OUTBOUND_WRITE)
-        parts.append(
-            "Data exfiltration: "
-            f"{len(readers)} sensitive-read {'tool' if len(readers) == 1 else 'tools'} "
-            "can reach "
-            f"{len(writers)} outbound-write {'tool' if len(writers) == 1 else 'tools'}."
-        )
-    if any(f.category == INJECTION_CATEGORY for f in findings):
-        ingests = _names_with(inventory, Capability.UNTRUSTED_INGEST)
-        actions = _names_with(inventory, Capability.PRIVILEGED_ACTION)
-        parts.append(
-            "Prompt injection: "
-            f"{len(ingests)} untrusted-ingest {'tool' if len(ingests) == 1 else 'tools'} "
-            "can reach "
-            f"{len(actions)} privileged-action {'tool' if len(actions) == 1 else 'tools'}."
-        )
+    for rule in RULES:
+        if any(finding.category == rule.category for finding in findings):
+            sources = _names_with(inventory, rule.source)
+            sinks = _names_with(inventory, rule.sink)
+            parts.append(rule.summary_line(sources, sinks))
     return " ".join(parts)
 
 
@@ -209,96 +199,134 @@ def _quoted_names(names: list[str]) -> str:
     return f"{', '.join(quoted[:-1])} and {quoted[-1]}"
 
 
-def _exfiltration_finding(readers: list[str], writers: list[str]) -> tuple[str, str, list[str]]:
-    if readers == writers and len(readers) == 1:
-        reader = readers[0]
+@dataclass(frozen=True)
+class PairingRule:
+    """One capability pairing: when it fires and exactly what it says.
+
+    The wording is data on the rule, not code per rule, so both pairings share
+    one finding builder and keep emitting their byte-for-byte historical text.
+    """
+
+    category: str
+    severity: str
+    source: Capability
+    sink: Capability
+    summary_label: str
+    source_role: str
+    sink_role: str
+    single_description: str
+    single_recommendation: str
+    description: str
+    recommendation: str
+    self_path: str
+
+    def finding(self, sources: list[str], sinks: list[str]) -> tuple[str, str, list[str]]:
+        """(description, recommendation, tools) for one completed pairing."""
+        if sources == sinks and len(sources) == 1:
+            tool = sources[0]
+            return (
+                self.single_description.format(tool=tool),
+                self.single_recommendation.format(tool=tool),
+                [tool],
+            )
+        source_names = _quoted_names(sources)
+        sink_names = _quoted_names(sinks)
+        overlap = sorted(set(sources) & set(sinks))
+        self_path = self.self_path.format(overlap=_quoted_names(overlap)) if overlap else ""
         return (
-            f"'{reader}' both reads sensitive data and sends data outside the "
-            "session, so one call chain within this single tool is enough to "
-            "exfiltrate what it reads.",
-            f"Scope '{reader}' to the narrowest data it needs, and require explicit "
-            "approval before it sends anything outbound.",
-            [reader],
+            self.description.format(sources=source_names, sinks=sink_names, self_path=self_path),
+            self.recommendation.format(sources=source_names, sinks=sink_names),
+            sorted(set(sources) | set(sinks)),
         )
-    reader_names = _quoted_names(readers)
-    writer_names = _quoted_names(writers)
-    overlap = sorted(set(readers) & set(writers))
-    self_path = (
-        f" Any tool appearing in both roles ({_quoted_names(overlap)}) can form one "
-        "call chain within that single tool."
-        if overlap
-        else ""
-    )
-    return (
-        f"Sensitive-read tools {reader_names} can pass what they read to outbound-write "
-        f"tools {writer_names} without further approval.{self_path}",
-        f"Confirm the sensitive-read tools {reader_names} and outbound-write tools "
-        f"{writer_names} genuinely "
-        "need to be enabled together. Scope each reader to the narrowest data it "
-        "needs and require explicit approval for outbound calls.",
-        sorted(set(readers) | set(writers)),
-    )
+
+    def summary_line(self, sources: list[str], sinks: list[str]) -> str:
+        """The summary sentence for a pairing that produced a finding."""
+        return (
+            f"{self.summary_label}: "
+            f"{len(sources)} {self.source_role} {'tool' if len(sources) == 1 else 'tools'} "
+            "can reach "
+            f"{len(sinks)} {self.sink_role} {'tool' if len(sinks) == 1 else 'tools'}."
+        )
 
 
-def _injection_finding(ingests: list[str], actions: list[str]) -> tuple[str, str, list[str]]:
-    if ingests == actions and len(ingests) == 1:
-        ingest = ingests[0]
-        return (
-            f"'{ingest}' both ingests untrusted content and takes privileged "
-            "actions, so content it pulls in can steer its own later calls.",
-            f"Treat everything '{ingest}' returns as untrusted data rather than "
-            "instructions, and require explicit approval before it acts on that "
-            "content.",
-            [ingest],
-        )
-    ingest_names = _quoted_names(ingests)
-    action_names = _quoted_names(actions)
-    overlap = sorted(set(ingests) & set(actions))
-    self_path = (
-        f" For any tool appearing in both roles ({_quoted_names(overlap)}), content "
-        "it pulls in can steer its own later calls."
-        if overlap
-        else ""
-    )
-    return (
-        f"Untrusted-ingest tools {ingest_names} can expose privileged-action "
-        f"tools {action_names} to hidden instructions that steer later calls.{self_path}",
-        f"Treat everything returned by {ingest_names} as untrusted data rather than "
-        f"instructions, and require explicit approval for calls to {action_names} "
-        "that follow it.",
-        sorted(set(ingests) | set(actions)),
-    )
+RULES: tuple[PairingRule, ...] = (
+    PairingRule(
+        category=EXFILTRATION_CATEGORY,
+        severity=EXFILTRATION_SEVERITY,
+        source=Capability.SENSITIVE_READ,
+        sink=Capability.OUTBOUND_WRITE,
+        summary_label="Data exfiltration",
+        source_role="sensitive-read",
+        sink_role="outbound-write",
+        single_description=(
+            "'{tool}' both reads sensitive data and sends data outside the session, so "
+            "one call chain within this single tool is enough to exfiltrate what it reads."
+        ),
+        single_recommendation=(
+            "Scope '{tool}' to the narrowest data it needs, and require explicit "
+            "approval before it sends anything outbound."
+        ),
+        description=(
+            "Sensitive-read tools {sources} can pass what they read to outbound-write "
+            "tools {sinks} without further approval.{self_path}"
+        ),
+        recommendation=(
+            "Confirm the sensitive-read tools {sources} and outbound-write tools "
+            "{sinks} genuinely need to be enabled together. Scope each reader to the "
+            "narrowest data it needs and require explicit approval for outbound calls."
+        ),
+        self_path=(
+            " Any tool appearing in both roles ({overlap}) can form one call chain "
+            "within that single tool."
+        ),
+    ),
+    PairingRule(
+        category=INJECTION_CATEGORY,
+        severity=INJECTION_SEVERITY,
+        source=Capability.UNTRUSTED_INGEST,
+        sink=Capability.PRIVILEGED_ACTION,
+        summary_label="Prompt injection",
+        source_role="untrusted-ingest",
+        sink_role="privileged-action",
+        single_description=(
+            "'{tool}' both ingests untrusted content and takes privileged actions, so "
+            "content it pulls in can steer its own later calls."
+        ),
+        single_recommendation=(
+            "Treat everything '{tool}' returns as untrusted data rather than "
+            "instructions, and require explicit approval before it acts on that content."
+        ),
+        description=(
+            "Untrusted-ingest tools {sources} can expose privileged-action tools "
+            "{sinks} to hidden instructions that steer later calls.{self_path}"
+        ),
+        recommendation=(
+            "Treat everything returned by {sources} as untrusted data rather than "
+            "instructions, and require explicit approval for calls to {sinks} "
+            "that follow it."
+        ),
+        self_path=(
+            " For any tool appearing in both roles ({overlap}), content it pulls in "
+            "can steer its own later calls."
+        ),
+    ),
+)
 
 
 def _analyze(inventory: list[ToolEntry]) -> Assessment:
     """Apply the capability-pairing rules. Pure, total, and order-independent."""
     findings: list[Finding] = []
 
-    pairings = (
-        (
-            EXFILTRATION_CATEGORY,
-            EXFILTRATION_SEVERITY,
-            _exfiltration_finding,
-            _names_with(inventory, Capability.SENSITIVE_READ),
-            _names_with(inventory, Capability.OUTBOUND_WRITE),
-        ),
-        (
-            INJECTION_CATEGORY,
-            INJECTION_SEVERITY,
-            _injection_finding,
-            _names_with(inventory, Capability.UNTRUSTED_INGEST),
-            _names_with(inventory, Capability.PRIVILEGED_ACTION),
-        ),
-    )
-
-    for category, severity, build, sources, sinks in pairings:
+    for rule in RULES:
+        sources = _names_with(inventory, rule.source)
+        sinks = _names_with(inventory, rule.sink)
         if sources and sinks:
-            description, recommendation, tools = build(sources, sinks)
+            description, recommendation, tools = rule.finding(sources, sinks)
             findings.append(
                 Finding(
                     id=f"RISK-{len(findings) + 1:03d}",
-                    category=category,
-                    severity=severity,
+                    category=rule.category,
+                    severity=rule.severity,
                     tools=tools,
                     description=description,
                     recommendation=recommendation,
@@ -337,8 +365,14 @@ def assess(tool_inventory: list[ToolEntry]) -> Assessment:
     return _analyze(tool_inventory)
 
 
-def main():
-    mcp.run()
+def main() -> None:
+    """Run the Sentinel MCP server over stdio (the console-script entry point)."""
+    logger.info("starting the sentinel MCP server over stdio")
+    try:
+        mcp.run()
+    except KeyboardInterrupt:
+        logger.info("interrupted; stopping the sentinel MCP server")
+        raise
 
 
 if __name__ == "__main__":
