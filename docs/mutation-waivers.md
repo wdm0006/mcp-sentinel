@@ -53,3 +53,11 @@ uv run mutmut show <id> # diff of a surviving mutant
 - Negative result worth keeping: substring assertions (`msg in caplog.text`)
   cannot kill `XX…XX` wrapper mutants — the exact-record form above is the
   minimum assertion strength for log-contract tests in this repository.
+
+### Campaign 2026-09-19 — `src/sentinel/server.py` (mutmut 3.7.0)
+
+- Result: **97/97 mutants killed**, 0 survived, 0 timeout, 0 suspicious, 0 skipped.
+- Suite at campaign time: 42 tests (the release-workflow guards joined it), ~0.5 s.
+- Re-run because `also_copy` now carries `.github` as well as `README.md`: the
+  workflow guards read `.github/` at the repo root, so without it every mutant
+  would have been "killed" by a shadow-tree test error rather than by the suite.
