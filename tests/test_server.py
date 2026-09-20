@@ -207,7 +207,7 @@ async def test_untrusted_ingest_with_privileged_action_reports_injection():
     assert result == {
         "findings": [
             {
-                "id": "RISK-001",
+                "id": "RISK-002",
                 "category": "prompt-injection",
                 "severity": "high",
                 "tools": ["fetch", "shell"],
@@ -228,6 +228,34 @@ async def test_untrusted_ingest_with_privileged_action_reports_injection():
         ),
         "limitations": LIMITATIONS,
     }
+
+
+async def test_prompt_injection_id_is_stable_when_an_unrelated_rule_also_fires():
+    injection_inventory = [
+        {"name": "fetch", "capabilities": ["untrusted-ingest"]},
+        {"name": "shell", "capabilities": ["privileged-action"]},
+    ]
+    injection_only = await assess(injection_inventory)
+    with_exfiltration = await assess(
+        injection_inventory
+        + [
+            {"name": "db", "capabilities": ["sensitive-read"]},
+            {"name": "http", "capabilities": ["outbound-write"]},
+        ]
+    )
+
+    injection_only_finding = next(
+        finding
+        for finding in injection_only["findings"]
+        if finding["category"] == "prompt-injection"
+    )
+    combined_finding = next(
+        finding
+        for finding in with_exfiltration["findings"]
+        if finding["category"] == "prompt-injection"
+    )
+
+    assert injection_only_finding["id"] == combined_finding["id"] == "RISK-002"
 
 
 async def test_single_tool_carrying_both_sides_of_a_pairing_is_reported():

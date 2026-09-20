@@ -207,6 +207,7 @@ class PairingRule:
     one finding builder and keep emitting their byte-for-byte historical text.
     """
 
+    risk_id: str
     category: str
     severity: str
     source: Capability
@@ -251,6 +252,7 @@ class PairingRule:
 
 RULES: tuple[PairingRule, ...] = (
     PairingRule(
+        risk_id="RISK-001",
         category=EXFILTRATION_CATEGORY,
         severity=EXFILTRATION_SEVERITY,
         source=Capability.SENSITIVE_READ,
@@ -281,6 +283,7 @@ RULES: tuple[PairingRule, ...] = (
         ),
     ),
     PairingRule(
+        risk_id="RISK-002",
         category=INJECTION_CATEGORY,
         severity=INJECTION_SEVERITY,
         source=Capability.UNTRUSTED_INGEST,
@@ -324,7 +327,7 @@ def _analyze(inventory: list[ToolEntry]) -> Assessment:
             description, recommendation, tools = rule.finding(sources, sinks)
             findings.append(
                 Finding(
-                    id=f"RISK-{len(findings) + 1:03d}",
+                    id=rule.risk_id,
                     category=rule.category,
                     severity=rule.severity,
                     tools=tools,
