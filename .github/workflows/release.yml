@@ -11,6 +11,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag to build, for example v0.1.0"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -24,7 +29,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # First checkout is only there to make the selection script available; a
+      # manual dispatch runs from a branch, so the tag to build is not known yet.
       - uses: actions/checkout@v4
+
+      - name: Select the release tag
+        id: release
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="$(bash .github/scripts/select-release-tag.sh \
+            "$GITHUB_EVENT_NAME" "$DISPATCH_TAG" "$GITHUB_REF_NAME")"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # Everything below builds the selected tag, not the ref the run started on.
+      - name: Check out the release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -32,11 +54,13 @@ jobs:
           enable-cache: true
 
       - name: Verify the tag matches the package version
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TAG_VERSION="${RELEASE_TAG#v}"
           PYPROJECT_VERSION="$(uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           if [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]; then
-            echo "::error::tag $GITHUB_REF_NAME (version $TAG_VERSION) does not match pyproject.toml version $PYPROJECT_VERSION"
+            echo "::error::tag $RELEASE_TAG (version $TAG_VERSION) does not match pyproject.toml version $PYPROJECT_VERSION"
             exit 1
           fi
 
@@ -54,7 +78,8 @@ jobs:
       - name: Attach artifacts to a draft GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --draft --title "$GITHUB_REF_NAME" --generate-notes \
+          gh release create "$RELEASE_TAG" \
+            --draft --title "$RELEASE_TAG" --generate-notes \
             dist/*
