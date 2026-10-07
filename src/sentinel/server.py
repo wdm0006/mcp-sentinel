@@ -343,6 +343,19 @@ def _analyze(inventory: list[ToolEntry]) -> Assessment:
     )
 
 
+TAGGING_EXAMPLES: tuple[tuple[str, tuple[Capability, ...]], ...] = (
+    ("shell or exec tool", (Capability.PRIVILEGED_ACTION, Capability.OUTBOUND_WRITE)),
+    ("web fetch tool", (Capability.UNTRUSTED_INGEST, Capability.OUTBOUND_WRITE)),
+    ("mail reader", (Capability.SENSITIVE_READ, Capability.UNTRUSTED_INGEST)),
+    ("file write or edit tool", (Capability.PRIVILEGED_ACTION,)),
+    ("database or file reader", (Capability.SENSITIVE_READ,)),
+    ("chat or email sender", (Capability.OUTBOUND_WRITE,)),
+)
+TAGGING_GUIDE = "\n".join(
+    f"- {archetype}: {', '.join(c.value for c in capabilities)}"
+    for archetype, capabilities in TAGGING_EXAMPLES
+)
+
 ASSESS_DESCRIPTION = f"""Assess an MCP tool surface for risky capability pairings.
 
 Pass every tool available in this session, tagging each with the capability
@@ -355,7 +368,14 @@ pairings: `sensitive-read` with `outbound-write` (data exfiltration) and
 `untrusted-ingest` with `privileged-action` (prompt injection into a
 privileged call). A single tool holding both sides of a pairing is reported
 too. The result is deterministic and depends only on the inventory's
-content, not its order."""
+content, not its order.
+
+Tagging guide:
+
+{TAGGING_GUIDE}
+
+Tag every tool, and when in doubt tag the riskier side: an omitted or
+under-tagged tool hides a pairing. A tool may carry several tags."""
 
 
 @mcp.tool(description=ASSESS_DESCRIPTION)
