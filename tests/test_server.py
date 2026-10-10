@@ -630,3 +630,36 @@ def test_main_logs_the_interrupt_before_reraising(monkeypatch, caplog):
         "starting the sentinel MCP server over stdio",
         "interrupted; stopping the sentinel MCP server",
     ]
+
+
+TAGGING_EXAMPLE_ROWS = [
+    ("shell or exec tool", ["privileged-action", "outbound-write"]),
+    ("web fetch tool", ["untrusted-ingest", "outbound-write"]),
+    ("mail reader", ["sensitive-read", "untrusted-ingest"]),
+    ("file write or edit tool", ["privileged-action"]),
+    ("database or file reader", ["sensitive-read"]),
+    ("chat or email sender", ["outbound-write"]),
+]
+DESCRIPTION_CAP = 1600
+
+
+async def _live_description():
+    async with Client(mcp) as client:
+        tools = await client.list_tools()
+    return tools[0].description
+
+
+@pytest.mark.parametrize(("archetype", "tags"), TAGGING_EXAMPLE_ROWS)
+async def test_description_tagging_guide_lists_each_archetype_with_its_tags(archetype, tags):
+    assert set(tags) <= {capability.value for capability in Capability}
+    assert f"- {archetype}: {', '.join(tags)}\n" in await _live_description() + "\n"
+
+
+async def test_description_states_the_tagging_rules_of_thumb():
+    description = await _live_description()
+    assert "Tag every tool" in description
+    assert "when in doubt tag the riskier side" in description
+
+
+async def test_description_length_stays_under_the_cap():
+    assert len(await _live_description()) < DESCRIPTION_CAP
